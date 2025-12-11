@@ -1,0 +1,13 @@
+# Bỏ qua các file dữ liệu nặng
+*.graphml
+*.csv
+coauthor_graph_louvain.gexf
+coauthor_graph_label_propagation.gexf
+final_dashboard_graph.gexf
+
+# Bỏ qua file rác của hệ thống/python
+__pycache__/
+*.pyc
+.ipynb_checkpoints
+*.ipynb
+.DS_Store
