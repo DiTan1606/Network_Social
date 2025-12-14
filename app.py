@@ -202,7 +202,7 @@ if G_full:
     if selected_author == "-- Xem Tổng Quan --":
         with st.sidebar.expander("📊 4. Giới hạn hiển thị", expanded=True):
             top_n = st.slider("Số lượng tác giả (Top Betweenness)",
-                              min_value=10, max_value=500, value=100, step=10)
+                              min_value=10, max_value=1000, value=100, step=10)
     else:
         st.sidebar.info("🎯 Đang ở chế độ Focus Tác giả")
 
