@@ -19,7 +19,17 @@ def load_graph():
         st.error("⚠️ Không tìm thấy file 'graph_with_time.gexf'. Hãy chạy script xử lý dữ liệu trước!")
         return None
 
+@st.cache_data
+def load_predictions():
+    try:
+        # Đọc file CSV dự báo
+        df = pd.read_csv('predictions.csv')
+        return df
+    except FileNotFoundError:
+        return pd.DataFrame() # Trả về bảng rỗng nếu chưa có file
+
 G_full = load_graph()
+df_pred = load_predictions()
 
 if G_full:
     # ==========================================
@@ -120,9 +130,39 @@ if G_full:
         center_id = name_to_id.get(selected_author)
 
         if center_id and center_id in G_comm:
+            # 1. Lấy mạng lưới hiện tại (Quá khứ/Hiện tại)
             neighbors = list(G_comm.neighbors(center_id))
             ego_nodes = neighbors + [center_id]
             G_viz = G_comm.subgraph(ego_nodes).copy()
+            
+            # 2. Lấy dữ liệu DỰ BÁO (Tương lai)
+            if not df_pred.empty:
+                # Tìm các dòng mà Source là tác giả đang chọn
+                my_preds = df_pred[df_pred['Source'] == selected_author]
+                
+                for _, row in my_preds.iterrows():
+                    target_name = row['Target']
+                    score = row['Score']
+                    model_name = row['Model']
+                    
+                    # Tìm ID của người được dự báo
+                    target_id = name_to_id.get(target_name)
+                    
+                    if target_id:
+                        # Nếu node chưa có trong G_viz thì thêm vào
+                        if not G_viz.has_node(target_id):
+                            # Copy thông tin node từ G_full để có đủ label, group...
+                            if G_full.has_node(target_id):
+                                G_viz.add_node(target_id, **G_full.nodes[target_id])
+                            else:
+                                G_viz.add_node(target_id, label=target_name, group=99) # Fallback
+                        
+                        # THÊM CẠNH DỰ BÁO (Đánh dấu type='future')
+                        if not G_viz.has_edge(center_id, target_id):
+                            G_viz.add_edge(center_id, target_id, 
+                                           title=f"Dự báo: {model_name}\nScore: {score:.4f}", 
+                                           type='future')
+
             st.success(f"🔍 Đang focus vào: **{selected_author}**")
         else:
             st.warning("Tác giả không tìm thấy trong bộ lọc hiện tại.")
@@ -171,8 +211,19 @@ if G_full:
                         size = 10
                     net.add_node(n, label=label, title=title, value=size, group=group)
 
+            # --- VẼ CẠNH ---
             for u, v, d in G_viz.edges(data=True):
-                net.add_edge(u, v, value=1, color={'inherit': 'from', 'opacity': 0.6})
+                # Kiểm tra xem đây là cạnh thường hay dự báo
+                if d.get('type') == 'future':
+                    # Cấu hình nét đứt (dashes) và màu nổi bật
+                    net.add_edge(u, v, 
+                                 title=d.get('title', ''), 
+                                 color='red', 
+                                 dashes=True,  # <--- NÉT ĐỨT
+                                 width=2)
+                else:
+                    # Cạnh bình thường
+                    net.add_edge(u, v, value=1, color={'inherit': 'from', 'opacity': 0.6})
 
             net.barnes_hut(gravity=-2000, spring_length=150)
 
@@ -185,7 +236,10 @@ if G_full:
         st.subheader("Thống kê")
         if G_viz:
             st.metric("Tác giả hiển thị", G_viz.number_of_nodes())
-            st.metric("Mối quan hệ", G_viz.number_of_edges())
+            # Tách số liệu mối quan hệ
+            num_edges = G_viz.number_of_edges()
+            num_future = sum(1 for u,v,d in G_viz.edges(data=True) if d.get('type') == 'future')
+            st.metric("Mối quan hệ", num_edges, delta=f"+{num_future} Dự báo" if num_future > 0 else None)
 
         if selected_author == "-- Xem Tổng Quan --" and G_viz and G_viz.number_of_nodes() > 0:
             data_chart = []
@@ -206,6 +260,24 @@ if G_full:
             if selected_author in name_to_id:
                 center_id = name_to_id[selected_author]
                 neighbors_list = []
+                # Chỉ lấy các neighbor "thật" (không phải future)
                 for neighbor_id in G_viz.neighbors(center_id):
-                    neighbors_list.append(G_viz.nodes[neighbor_id].get('label', str(neighbor_id)))
-                st.dataframe(pd.DataFrame(neighbors_list, columns=["Đồng tác giả"]), hide_index=True)
+                    edge_data = G_viz.get_edge_data(center_id, neighbor_id)
+                    if edge_data.get('type') != 'future':
+                        neighbors_list.append(G_viz.nodes[neighbor_id].get('label', str(neighbor_id)))
+                
+                if neighbors_list:
+                    st.dataframe(pd.DataFrame(neighbors_list, columns=["Đồng tác giả"]), hide_index=True)
+                else:
+                    st.info("Chưa có kết nối nào trong bộ lọc này.")
+
+            # THÊM BẢNG DỰ BÁO
+            if not df_pred.empty:
+                st.markdown("### 🔮 Dự báo tiềm năng")
+                my_preds = df_pred[df_pred['Source'] == selected_author][['Target', 'Score', 'Model']].copy()
+                if not my_preds.empty:
+                    # Format Score với 6 chữ số thập phân
+                    my_preds['Score'] = my_preds['Score'].apply(lambda x: f"{x:.6f}")
+                    st.dataframe(my_preds.head(10), hide_index=True)
+                else:
+                    st.info("Chưa có dự báo cho tác giả này.")
