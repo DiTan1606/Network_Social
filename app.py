@@ -6,8 +6,81 @@ import streamlit.components.v1 as components
 import plotly.express as px
 
 # --- CẤU HÌNH TRANG ---
-st.set_page_config(layout="wide", page_title="Social Network Analysis")
-st.title("🕸️ Phân tích Mạng lưới & Cộng đồng Tác giả")
+st.set_page_config(layout="wide", page_title="Co-author Communities & Bridges Dashboard", page_icon="🌐")
+
+# --- CUSTOM CSS ---
+st.markdown("""
+<style>
+    /* Header gradient */
+    .main-header {
+        background: linear-gradient(90deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);
+        padding: 1.5rem 2rem;
+        border-radius: 10px;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .main-header h1 {
+        color: white;
+        margin: 0;
+        font-size: 2rem;
+        text-align: center;
+    }
+    .main-header p {
+        color: #b8d4ff;
+        text-align: center;
+        margin: 0.5rem 0 0 0;
+        font-size: 0.95rem;
+    }
+    
+    /* Metric cards */
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+    div[data-testid="stMetric"] label {
+        color: #e0e0e0 !important;
+    }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+        color: white !important;
+        font-weight: bold;
+    }
+    
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+    }
+    section[data-testid="stSidebar"] .stMarkdown h1,
+    section[data-testid="stSidebar"] .stMarkdown h2,
+    section[data-testid="stSidebar"] .stMarkdown h3 {
+        color: #4fc3f7 !important;
+    }
+    
+    /* Expander styling */
+    .streamlit-expanderHeader {
+        background-color: rgba(79, 195, 247, 0.1);
+        border-radius: 8px;
+    }
+    
+    /* Card container */
+    .stat-card {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- HEADER ---
+st.markdown("""
+<div class="main-header">
+    <h1>🌐 Co-author Communities & Bridges Dashboard</h1>
+    <p>Phân tích mạng lưới đồng tác giả | Khám phá cộng đồng | Dự báo kết nối</p>
+</div>
+""", unsafe_allow_html=True)
 
 # --- 1. LOAD DỮ LIỆU ---
 @st.cache_data
@@ -33,6 +106,22 @@ df_pred = load_predictions()
 
 if G_full:
     # ==========================================
+    # 📊 METRICS ROW - THỐNG KÊ TỔNG QUAN
+    # ==========================================
+    total_nodes = G_full.number_of_nodes()
+    total_edges = G_full.number_of_edges()
+    total_communities = len(set(d.get('louvain_community', 0) for _, d in G_full.nodes(data=True)))
+    avg_degree = sum(dict(G_full.degree()).values()) / total_nodes if total_nodes > 0 else 0
+    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("👥 Tổng Tác giả", f"{total_nodes:,}")
+    m2.metric("🔗 Tổng Kết nối", f"{total_edges:,}")
+    m3.metric("🏘️ Số Cộng đồng", total_communities)
+    m4.metric("📈 Degree TB", f"{avg_degree:.1f}")
+    
+    st.markdown("---")
+    
+    # ==========================================
     # 🌩️ SIDEBAR: CẤU HÌNH THEO THỨ TỰ MỚI
     # ==========================================
     st.sidebar.header("🎛️ Bộ lọc hiển thị")
@@ -50,8 +139,8 @@ if G_full:
     sorted_years = sorted(list(all_years))
     time_options = ["Toàn thời gian"] + [str(y) for y in sorted_years]
 
-    st.sidebar.subheader("1. Chọn Mốc Thời Gian")
-    selected_time = st.sidebar.radio("Thời gian:", options=time_options, horizontal=True, label_visibility="collapsed")
+    with st.sidebar.expander("⏰ 1. Mốc Thời Gian", expanded=True):
+        selected_time = st.radio("Thời gian:", options=time_options, horizontal=True, label_visibility="collapsed")
 
     # -> XỬ LÝ LOGIC LỌC NĂM
     if selected_time != "Toàn thời gian":
@@ -76,18 +165,17 @@ if G_full:
     else:
         sorted_comms = []
 
-    st.sidebar.subheader("2. Chọn Cộng đồng")
+    with st.sidebar.expander("🏘️ 2. Chọn Cộng đồng", expanded=True):
+        all_comms_selected = st.checkbox("Chọn tất cả cộng đồng", value=True)
 
-    all_comms_selected = st.sidebar.checkbox("Chọn tất cả cộng đồng", value=True)
-
-    if all_comms_selected:
-        selected_comms = sorted_comms
-    else:
-        selected_comms = st.sidebar.multiselect(
-            "Chọn nhóm cụ thể:",
-            options=sorted_comms,
-            default=sorted_comms[:3] if len(sorted_comms) > 3 else sorted_comms
-        )
+        if all_comms_selected:
+            selected_comms = sorted_comms
+        else:
+            selected_comms = st.multiselect(
+                "Chọn nhóm cụ thể:",
+                options=sorted_comms,
+                default=sorted_comms[:3] if len(sorted_comms) > 3 else sorted_comms
+            )
 
     # -> XỬ LÝ LOGIC LỌC CỘNG ĐỒNG
     nodes_in_comm = [n for n, d in G_time.nodes(data=True) if d.get('louvain_community') in selected_comms]
@@ -96,8 +184,6 @@ if G_full:
     # ----------------------------------------
     # 3. LỌC TÁC GIẢ (Focus Mode)
     # ----------------------------------------
-    st.sidebar.subheader("3. Tìm & Focus Tác giả")
-
     name_to_id = {}
     current_names = []
     for n, data in G_comm.nodes(data=True):
@@ -107,17 +193,18 @@ if G_full:
 
     list_names = ["-- Xem Tổng Quan --"] + sorted(list(set(current_names)))
 
-    selected_author = st.sidebar.selectbox("Gõ tên để Focus:", list_names)
+    with st.sidebar.expander("🔍 3. Tìm & Focus Tác giả", expanded=True):
+        selected_author = st.selectbox("Gõ tên để Focus:", list_names)
 
     # ----------------------------------------
     # 4. CHỌN HIỂN THỊ TOP N (Chỉ dùng cho Tổng quan)
     # ----------------------------------------
     if selected_author == "-- Xem Tổng Quan --":
-        st.sidebar.subheader("4. Giới hạn hiển thị")
-        top_n = st.sidebar.slider("Số lượng tác giả (Top Betweenness)",
-                                  min_value=10, max_value=500, value=100, step=10)
+        with st.sidebar.expander("📊 4. Giới hạn hiển thị", expanded=True):
+            top_n = st.slider("Số lượng tác giả (Top Betweenness)",
+                              min_value=10, max_value=500, value=100, step=10)
     else:
-        st.sidebar.info("Đang ở chế độ Focus Tác giả. Bộ lọc Top N tạm ẩn.")
+        st.sidebar.info("🎯 Đang ở chế độ Focus Tác giả")
 
     # ==========================================
     # ⚙️ XỬ LÝ GRAPH CUỐI CÙNG ĐỂ VẼ (G_VIZ)
@@ -233,7 +320,7 @@ if G_full:
             st.info("Không có dữ liệu. Hãy nới lỏng bộ lọc.")
 
     with col2:
-        st.subheader("Thống kê")
+        st.subheader("📈 Thống kê View")
         if G_viz:
             st.metric("Tác giả hiển thị", G_viz.number_of_nodes())
             # Tách số liệu mối quan hệ
@@ -242,6 +329,32 @@ if G_full:
             st.metric("Mối quan hệ", num_edges, delta=f"+{num_future} Dự báo" if num_future > 0 else None)
 
         if selected_author == "-- Xem Tổng Quan --" and G_viz and G_viz.number_of_nodes() > 0:
+            # --- PIE CHART: PHÂN BỐ CỘNG ĐỒNG ---
+            st.markdown("#### 🥧 Phân bố Cộng đồng")
+            comm_counts = {}
+            for n, d in G_viz.nodes(data=True):
+                comm = str(d.get('louvain_community', 0))
+                comm_counts[comm] = comm_counts.get(comm, 0) + 1
+            
+            df_pie = pd.DataFrame([
+                {'Cộng đồng': f"Nhóm {k}", 'Số lượng': v} 
+                for k, v in sorted(comm_counts.items(), key=lambda x: -x[1])
+            ])
+            
+            fig_pie = px.pie(df_pie, values='Số lượng', names='Cộng đồng', 
+                            hole=0.4,
+                            color_discrete_sequence=px.colors.qualitative.Set3)
+            fig_pie.update_layout(
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=-0.3),
+                margin=dict(t=20, b=20, l=20, r=20),
+                height=250
+            )
+            fig_pie.update_traces(textposition='inside', textinfo='percent')
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # --- BAR CHART: XẾP HẠNG ---
+            st.markdown("#### 🏆 Top Bridges")
             data_chart = []
             for n, d in G_viz.nodes(data=True):
                 data_chart.append({
@@ -249,18 +362,23 @@ if G_full:
                     'Điểm': d.get('betweenness', 0),
                     'Nhóm': str(d.get('louvain_community', 0))
                 })
-            df_chart = pd.DataFrame(data_chart).sort_values('Điểm', ascending=False).head(15)
+            df_chart = pd.DataFrame(data_chart).sort_values('Điểm', ascending=False).head(10)
 
-            fig = px.bar(df_chart, x='Điểm', y='Tên', color='Nhóm', orientation='h', title="Xếp hạng")
-            fig.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False)
+            fig = px.bar(df_chart, x='Điểm', y='Tên', color='Nhóm', orientation='h',
+                        color_discrete_sequence=px.colors.qualitative.Set2)
+            fig.update_layout(
+                yaxis={'categoryorder': 'total ascending'}, 
+                showlegend=False,
+                margin=dict(t=10, b=10, l=10, r=10),
+                height=300
+            )
             st.plotly_chart(fig, use_container_width=True)
 
         elif selected_author != "-- Xem Tổng Quan --" and G_viz:
-            st.markdown("### Kết nối trực tiếp")
+            st.markdown("### 👥 Kết nối trực tiếp")
             if selected_author in name_to_id:
                 center_id = name_to_id[selected_author]
                 neighbors_list = []
-                # Chỉ lấy các neighbor "thật" (không phải future)
                 for neighbor_id in G_viz.neighbors(center_id):
                     edge_data = G_viz.get_edge_data(center_id, neighbor_id)
                     if edge_data.get('type') != 'future':
@@ -271,12 +389,11 @@ if G_full:
                 else:
                     st.info("Chưa có kết nối nào trong bộ lọc này.")
 
-            # THÊM BẢNG DỰ BÁO
+            # BẢNG DỰ BÁO
             if not df_pred.empty:
                 st.markdown("### 🔮 Dự báo tiềm năng")
                 my_preds = df_pred[df_pred['Source'] == selected_author][['Target', 'Score', 'Model']].copy()
                 if not my_preds.empty:
-                    # Format Score với 6 chữ số thập phân
                     my_preds['Score'] = my_preds['Score'].apply(lambda x: f"{x:.6f}")
                     st.dataframe(my_preds.head(10), hide_index=True)
                 else:
