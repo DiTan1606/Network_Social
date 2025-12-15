@@ -106,18 +106,18 @@ df_pred = load_predictions()
 
 if G_full:
     # ==========================================
-    # 📊 METRICS ROW - THỐNG KÊ TỔNG QUAN
+    # 📊 METRICS ROW - THỐNG KÊ TỔNG QUAN (Số liệu cố định)
     # ==========================================
-    total_nodes = G_full.number_of_nodes()
-    total_edges = G_full.number_of_edges()
-    total_communities = len(set(d.get('louvain_community', 0) for _, d in G_full.nodes(data=True)))
-    avg_degree = sum(dict(G_full.degree()).values()) / total_nodes if total_nodes > 0 else 0
+    total_nodes = 166314
+    total_edges = 2206369
+    total_communities = 9345
+    avg_degree = 26.53
     
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("👥 Tổng Tác giả", f"{total_nodes:,}")
     m2.metric("🔗 Tổng Kết nối", f"{total_edges:,}")
-    m3.metric("🏘️ Số Cộng đồng", total_communities)
-    m4.metric("📈 Degree TB", f"{avg_degree:.1f}")
+    m3.metric("🏘️ Số Cộng đồng", f"{total_communities:,}")
+    m4.metric("📈 Degree TB", f"{avg_degree:.2f}")
     
     st.markdown("---")
     
@@ -398,3 +398,4 @@ if G_full:
                     st.dataframe(my_preds.head(10), hide_index=True)
                 else:
                     st.info("Chưa có dự báo cho tác giả này.")
+                    
