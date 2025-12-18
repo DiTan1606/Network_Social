@@ -1,9 +1,9 @@
-import streamlit as st
-import networkx as nx
-from pyvis.network import Network
-import pandas as pd
+import streamlit as st #giao diện web + deploy
+import networkx as nx #tính toán đồ thị
+from pyvis.network import Network #xay dựng mạng lưới tương tác 
+import pandas as pd #xử lý dữ liệu 
 import streamlit.components.v1 as components
-import plotly.express as px
+import plotly.express as px #vẽ biểu đồ
 
 # --- CẤU HÌNH TRANG ---
 st.set_page_config(layout="wide", page_title="Co-author Communities & Bridges Dashboard", page_icon="🌐")
@@ -89,7 +89,7 @@ def load_graph():
         G = nx.read_gexf('graph_with_time.gexf')
         return G
     except FileNotFoundError:
-        st.error("⚠️ Không tìm thấy file 'graph_with_time.gexf'. Hãy chạy script xử lý dữ liệu trước!")
+        st.error("Không tìm thấy file 'graph_with_time.gexf'. Hãy chạy script xử lý dữ liệu trước!")
         return None
 
 @st.cache_data
@@ -99,14 +99,14 @@ def load_predictions():
         df = pd.read_csv('predictions.csv')
         return df
     except FileNotFoundError:
-        return pd.DataFrame() # Trả về bảng rỗng nếu chưa có file
+        return pd.DataFrame() 
 
 G_full = load_graph()
 df_pred = load_predictions()
 
 if G_full:
     # ==========================================
-    # 📊 METRICS ROW - THỐNG KÊ TỔNG QUAN (Số liệu cố định)
+    # METRICS ROW - THỐNG KÊ TỔNG QUAN (Số liệu cố định)
     # ==========================================
     total_nodes = 166314
     total_edges = 2206369
@@ -121,8 +121,8 @@ if G_full:
     
     st.markdown("---")
     
-    # ==========================================
-    # 🌩️ SIDEBAR: CẤU HÌNH THEO THỨ TỰ MỚI
+    # =========================================
+    # SIDEBAR
     # ==========================================
     st.sidebar.header("🎛️ Bộ lọc hiển thị")
 
@@ -207,7 +207,7 @@ if G_full:
         st.sidebar.info("🎯 Đang ở chế độ Focus Tác giả")
 
     # ==========================================
-    # ⚙️ XỬ LÝ GRAPH CUỐI CÙNG ĐỂ VẼ (G_VIZ)
+    # XỬ LÝ GRAPH CUỐI CÙNG ĐỂ VẼ (G_VIZ)
     # ==========================================
 
     G_viz = None
@@ -236,9 +236,7 @@ if G_full:
                     target_id = name_to_id.get(target_name)
                     
                     if target_id:
-                        # Nếu node chưa có trong G_viz thì thêm vào
                         if not G_viz.has_node(target_id):
-                            # Copy thông tin node từ G_full để có đủ label, group...
                             if G_full.has_node(target_id):
                                 G_viz.add_node(target_id, **G_full.nodes[target_id])
                             else:
@@ -264,7 +262,7 @@ if G_full:
         G_viz = G_comm.subgraph(top_node_ids).copy()
 
     # ==========================================
-    # 🎨 VẼ GIAO DIỆN CHÍNH
+    #  VẼ GIAO DIỆN CHÍNH
     # ==========================================
     col1, col2 = st.columns([3, 1])
 
@@ -277,7 +275,7 @@ if G_full:
                 group = d.get('louvain_community', 0)
                 title = f"{label}\nGroup: {group}\nScore: {d.get('betweenness', 0):.4f}"
 
-                # ⭐ HIGHLIGHT NODE CHÍNH KHI FOCUS
+                # HIGHLIGHT NODE CHÍNH KHI FOCUS
                 if selected_author != "-- Xem Tổng Quan --" and label == selected_author:
                     net.add_node(n,
                                  label=f"⭐ {label}",
