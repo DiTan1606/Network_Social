@@ -1,17 +1,18 @@
-import streamlit as st #giao diện web + deploy
-import networkx as nx #tính toán đồ thị
-from pyvis.network import Network #xay dựng mạng lưới tương tác 
-import pandas as pd #xử lý dữ liệu 
+import streamlit as st
+import networkx as nx
+from pyvis.network import Network
+import pandas as pd
 import streamlit.components.v1 as components
-import plotly.express as px #vẽ biểu đồ
+import plotly.express as px
+import plotly.graph_objects as go
+from collections import defaultdict
 
 # --- CẤU HÌNH TRANG ---
-st.set_page_config(layout="wide", page_title="Co-author Communities & Bridges Dashboard", page_icon="🌐")
+st.set_page_config(layout="wide", page_title="Co-author Network Analysis", page_icon="🌐")
 
 # --- CUSTOM CSS ---
 st.markdown("""
 <style>
-    /* Header gradient */
     .main-header {
         background: linear-gradient(90deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);
         padding: 1.5rem 2rem;
@@ -19,95 +20,131 @@ st.markdown("""
         margin-bottom: 1.5rem;
         box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
-    .main-header h1 {
-        color: white;
-        margin: 0;
-        font-size: 2rem;
-        text-align: center;
-    }
-    .main-header p {
-        color: #b8d4ff;
-        text-align: center;
-        margin: 0.5rem 0 0 0;
-        font-size: 0.95rem;
-    }
+    .main-header h1 { color: white; margin: 0; font-size: 2rem; text-align: center; }
+    .main-header p { color: #b8d4ff; text-align: center; margin: 0.5rem 0 0 0; font-size: 0.95rem; }
     
-    /* Metric cards */
     div[data-testid="stMetric"] {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 10px;
+        padding: 1rem; border-radius: 10px;
         box-shadow: 0 4px 10px rgba(0,0,0,0.15);
     }
-    div[data-testid="stMetric"] label {
-        color: #e0e0e0 !important;
-    }
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        color: white !important;
-        font-weight: bold;
-    }
+    div[data-testid="stMetric"] label { color: #e0e0e0 !important; }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: white !important; font-weight: bold; }
     
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-    }
+    section[data-testid="stSidebar"] { background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%); }
     section[data-testid="stSidebar"] .stMarkdown h1,
     section[data-testid="stSidebar"] .stMarkdown h2,
-    section[data-testid="stSidebar"] .stMarkdown h3 {
-        color: #4fc3f7 !important;
-    }
+    section[data-testid="stSidebar"] .stMarkdown h3 { color: #4fc3f7 !important; }
     
-    /* Expander styling */
-    .streamlit-expanderHeader {
-        background-color: rgba(79, 195, 247, 0.1);
+    .tooltip-box {
+        background: rgba(30, 60, 114, 0.95);
+        border: 1px solid #4fc3f7;
         border-radius: 8px;
-    }
-    
-    /* Card container */
-    .stat-card {
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 10px;
         padding: 1rem;
-        margin-bottom: 1rem;
+        margin: 0.5rem 0;
     }
+    .tooltip-box h4 { color: #4fc3f7; margin: 0 0 0.5rem 0; }
+    .tooltip-box p { color: #e0e0e0; margin: 0.3rem 0; font-size: 0.9rem; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- HEADER ---
 st.markdown("""
 <div class="main-header">
-    <h1>🌐 Co-author Communities & Bridges Dashboard</h1>
-    <p>Phân tích mạng lưới đồng tác giả | Khám phá cộng đồng | Dự báo kết nối</p>
+    <h1>🌐 Co-author Network Analysis Dashboard</h1>
+    <p>Multi-level Visualization | Community Detection | Bridge Analysis | Link Prediction</p>
 </div>
 """, unsafe_allow_html=True)
 
-# --- 1. LOAD DỮ LIỆU ---
+# --- LOAD DỮ LIỆU ---
 @st.cache_data
 def load_graph():
     try:
         G = nx.read_gexf('graph_with_time.gexf')
         return G
     except FileNotFoundError:
-        st.error("Không tìm thấy file 'graph_with_time.gexf'. Hãy chạy script xử lý dữ liệu trước!")
+        st.error("Không tìm thấy file 'graph_with_time.gexf'!")
         return None
 
 @st.cache_data
 def load_predictions():
     try:
-        # Đọc file CSV dự báo
-        df = pd.read_csv('predictions.csv')
-        return df
+        return pd.read_csv('predictions.csv')
     except FileNotFoundError:
-        return pd.DataFrame() 
+        return pd.DataFrame()
+
+@st.cache_data
+def compute_community_stats(_G):
+    """Tính toán thống kê cho từng community"""
+    comm_stats = defaultdict(lambda: {
+        'nodes': [], 'size': 0, 'internal_edges': 0,
+        'external_edges': 0, 'top_bridges': [], 'avg_betweenness': 0
+    })
+    
+    # Gom nodes theo community
+    for n, d in _G.nodes(data=True):
+        comm = d.get('louvain_community', 0)
+        comm_stats[comm]['nodes'].append(n)
+        comm_stats[comm]['size'] += 1
+    
+    # Tính edges và bridges
+    for comm_id, stats in comm_stats.items():
+        nodes_set = set(stats['nodes'])
+        betweenness_list = []
+        
+        for n in stats['nodes']:
+            node_data = _G.nodes[n]
+            betweenness_list.append((n, node_data.get('betweenness', 0), node_data.get('label', n)))
+            
+            for neighbor in _G.neighbors(n):
+                neighbor_comm = _G.nodes[neighbor].get('louvain_community', 0)
+                if neighbor_comm == comm_id:
+                    stats['internal_edges'] += 1
+                else:
+                    stats['external_edges'] += 1
+        
+        stats['internal_edges'] //= 2  # Đếm 2 lần
+        stats['avg_betweenness'] = sum(b for _, b, _ in betweenness_list) / len(betweenness_list) if betweenness_list else 0
+        stats['top_bridges'] = sorted(betweenness_list, key=lambda x: -x[1])[:5]
+    
+    return dict(comm_stats)
+
+@st.cache_data
+def build_meta_graph(_G, comm_stats):
+    """Xây dựng meta-graph: mỗi community là 1 node"""
+    meta_G = nx.Graph()
+    
+    # Thêm community nodes
+    for comm_id, stats in comm_stats.items():
+        meta_G.add_node(comm_id, 
+                        size=stats['size'],
+                        internal_edges=stats['internal_edges'],
+                        external_edges=stats['external_edges'],
+                        avg_betweenness=stats['avg_betweenness'],
+                        top_bridges=stats['top_bridges'])
+    
+    # Thêm edges giữa communities
+    comm_edges = defaultdict(int)
+    for u, v in _G.edges():
+        comm_u = _G.nodes[u].get('louvain_community', 0)
+        comm_v = _G.nodes[v].get('louvain_community', 0)
+        if comm_u != comm_v:
+            key = tuple(sorted([comm_u, comm_v]))
+            comm_edges[key] += 1
+    
+    for (c1, c2), weight in comm_edges.items():
+        meta_G.add_edge(c1, c2, weight=weight)
+    
+    return meta_G
 
 G_full = load_graph()
 df_pred = load_predictions()
 
 if G_full:
-    # ==========================================
-    # METRICS ROW - THỐNG KÊ TỔNG QUAN (Số liệu cố định)
-    # ==========================================
+    comm_stats = compute_community_stats(G_full)
+    meta_G = build_meta_graph(G_full, comm_stats)
+    
+    # --- METRICS (Số liệu thực tế của toàn bộ dataset) ---
     total_nodes = 166314
     total_edges = 2206369
     total_communities = 9345
@@ -120,280 +157,578 @@ if G_full:
     m4.metric("📈 Degree TB", f"{avg_degree:.2f}")
     
     st.markdown("---")
-    
-    # =========================================
-    # SIDEBAR
-    # ==========================================
-    st.sidebar.header("🎛️ Bộ lọc hiển thị")
 
-    # ----------------------------------------
-    # 1. LỌC THỜI GIAN (Năm)
-    # ----------------------------------------
+    # --- SIDEBAR ---
+    st.sidebar.header("🎛️ Điều khiển")
+    
+    # Chọn Level hiển thị
+    view_level = st.sidebar.radio(
+        "📊 Chế độ xem:",
+        ["🌍 Level 1: Tổng quan Communities", 
+         "🏘️ Level 2: Chi tiết Community", 
+         "👤 Level 3: Focus Tác giả"],
+        help="Chọn mức độ chi tiết để khám phá mạng lưới"
+    )
+    
+    # --- GIẢI THÍCH CHỈ SỐ ---
+    with st.sidebar.expander("📖 Giải thích chỉ số", expanded=False):
+        st.markdown("""
+        <div class="tooltip-box">
+            <h4>🔗 Betweenness Centrality</h4>
+            <p>Đo lường mức độ "cầu nối" của một tác giả. Giá trị cao = nằm trên nhiều đường đi ngắn nhất giữa các tác giả khác → quan trọng trong việc kết nối các nhóm nghiên cứu.</p>
+        </div>
+        <div class="tooltip-box">
+            <h4>🏘️ Louvain Community</h4>
+            <p>Thuật toán phát hiện cộng đồng dựa trên tối ưu hóa modularity. Các tác giả trong cùng community có xu hướng hợp tác chặt chẽ với nhau hơn.</p>
+        </div>
+        <div class="tooltip-box">
+            <h4>📊 Modularity</h4>
+            <p>Đo chất lượng phân chia community. Giá trị cao (gần 1) = cấu trúc community rõ ràng, các nhóm tách biệt tốt.</p>
+        </div>
+        <div class="tooltip-box">
+            <h4>🌉 Bridge Authors</h4>
+            <p>Tác giả có betweenness cao, kết nối nhiều community khác nhau. Họ thường là những người có nghiên cứu liên ngành hoặc hợp tác rộng.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Lọc thời gian
     all_years = set()
     for u, v, data in G_full.edges(data=True):
         y_str = data.get('years', '')
         if y_str and y_str != 'Unknown':
             for y in y_str.split(','):
-                all_years.add(int(y))
-
+                try:
+                    all_years.add(int(y))
+                except:
+                    pass
     sorted_years = sorted(list(all_years))
-    time_options = ["Toàn thời gian"] + [str(y) for y in sorted_years]
-
-    with st.sidebar.expander("⏰ 1. Mốc Thời Gian", expanded=True):
-        selected_time = st.radio("Thời gian:", options=time_options, horizontal=True, label_visibility="collapsed")
-
-    # -> XỬ LÝ LOGIC LỌC NĂM
-    if selected_time != "Toàn thời gian":
-        edges_in_year = []
-        for u, v, data in G_full.edges(data=True):
-            y_str = data.get('years', '')
-            if selected_time in y_str.split(','):
-                edges_in_year.append((u, v))
-        G_time = G_full.edge_subgraph(edges_in_year).copy()
+    
+    with st.sidebar.expander("⏰ Lọc thời gian", expanded=False):
+        time_filter = st.select_slider(
+            "Chọn năm:",
+            options=["Tất cả"] + sorted_years,
+            value="Tất cả"
+        )
+    
+    # Áp dụng filter thời gian
+    if time_filter != "Tất cả":
+        edges_in_year = [(u, v) for u, v, d in G_full.edges(data=True) 
+                         if str(time_filter) in d.get('years', '').split(',')]
+        G_filtered = G_full.edge_subgraph(edges_in_year).copy()
     else:
-        G_time = G_full.copy()
-
-    # ----------------------------------------
-    # 2. LỌC CỘNG ĐỒNG
-    # ----------------------------------------
-    if G_time.number_of_nodes() > 0:
-        available_comms = set()
-        for n, d in G_time.nodes(data=True):
-            if 'louvain_community' in d:
-                available_comms.add(d['louvain_community'])
-        sorted_comms = sorted(list(available_comms))
-    else:
-        sorted_comms = []
-
-    with st.sidebar.expander("🏘️ 2. Chọn Cộng đồng", expanded=True):
-        all_comms_selected = st.checkbox("Chọn tất cả cộng đồng", value=True)
-
-        if all_comms_selected:
-            selected_comms = sorted_comms
-        else:
-            selected_comms = st.multiselect(
-                "Chọn nhóm cụ thể:",
-                options=sorted_comms,
-                default=sorted_comms[:3] if len(sorted_comms) > 3 else sorted_comms
-            )
-
-    # -> XỬ LÝ LOGIC LỌC CỘNG ĐỒNG
-    nodes_in_comm = [n for n, d in G_time.nodes(data=True) if d.get('louvain_community') in selected_comms]
-    G_comm = G_time.subgraph(nodes_in_comm).copy()
-
-    # ----------------------------------------
-    # 3. LỌC TÁC GIẢ (Focus Mode)
-    # ----------------------------------------
-    name_to_id = {}
-    current_names = []
-    for n, data in G_comm.nodes(data=True):
-        label = data.get('label', str(n))
-        name_to_id[label] = n
-        current_names.append(label)
-
-    list_names = ["-- Xem Tổng Quan --"] + sorted(list(set(current_names)))
-
-    with st.sidebar.expander("🔍 3. Tìm & Focus Tác giả", expanded=True):
-        selected_author = st.selectbox("Gõ tên để Focus:", list_names)
-
-    # ----------------------------------------
-    # 4. CHỌN HIỂN THỊ TOP N (Chỉ dùng cho Tổng quan)
-    # ----------------------------------------
-    if selected_author == "-- Xem Tổng Quan --":
-        with st.sidebar.expander("📊 4. Giới hạn hiển thị", expanded=True):
-            top_n = st.slider("Số lượng tác giả (Top Betweenness)",
-                              min_value=10, max_value=1000, value=100, step=10)
-    else:
-        st.sidebar.info("🎯 Đang ở chế độ Focus Tác giả")
+        G_filtered = G_full
+    
+    # Build name mapping
+    name_to_id = {d.get('label', n): n for n, d in G_filtered.nodes(data=True)}
+    id_to_name = {n: d.get('label', n) for n, d in G_filtered.nodes(data=True)}
 
     # ==========================================
-    # XỬ LÝ GRAPH CUỐI CÙNG ĐỂ VẼ (G_VIZ)
+    # LEVEL 1: TỔNG QUAN COMMUNITIES (Meta-graph)
     # ==========================================
-
-    G_viz = None
-
-    # TH1: Chế độ Focus Tác giả
-    if selected_author != "-- Xem Tổng Quan --":
-        center_id = name_to_id.get(selected_author)
-
-        if center_id and center_id in G_comm:
-            # 1. Lấy mạng lưới hiện tại (Quá khứ/Hiện tại)
-            neighbors = list(G_comm.neighbors(center_id))
-            ego_nodes = neighbors + [center_id]
-            G_viz = G_comm.subgraph(ego_nodes).copy()
+    if "Level 1" in view_level:
+        st.subheader("🌍 Tổng quan: Mỗi node = 1 Community")
+        
+        # Option hiển thị bridges ở giữa
+        show_bridge_center = st.sidebar.checkbox("🌉 Hiện Top Bridges ở giữa", value=True,
+                                                  help="Hiển thị các tác giả cầu nối quan trọng nhất ở trung tâm")
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            net = Network(height="600px", width="100%", bgcolor="#1a1a2e", font_color="white")
+            colors = px.colors.qualitative.Set3 + px.colors.qualitative.Pastel
             
-            # 2. Lấy dữ liệu DỰ BÁO (Tương lai)
-            if not df_pred.empty:
-                # Tìm các dòng mà Source là tác giả đang chọn
-                my_preds = df_pred[df_pred['Source'] == selected_author]
+            if show_bridge_center:
+                # === CHẾ ĐỘ BRIDGES Ở GIỮA ===
+                import math
                 
-                for _, row in my_preds.iterrows():
-                    target_name = row['Target']
-                    score = row['Score']
-                    model_name = row['Model']
+                # Lấy top 10 bridges từ toàn bộ graph
+                all_bridges = sorted(
+                    [(n, d.get('betweenness', 0), d.get('label', n), d.get('louvain_community', 0)) 
+                     for n, d in G_filtered.nodes(data=True)],
+                    key=lambda x: -x[1]
+                )[:10]
+                
+                # Tính các communities mà mỗi bridge kết nối tới
+                bridge_connections = {}
+                for node_id, betw, name, own_comm in all_bridges:
+                    connected_comms = set()
+                    connected_comms.add(own_comm)  # Community của chính họ
+                    # Tìm tất cả communities của đồng tác giả
+                    for neighbor in G_filtered.neighbors(node_id):
+                        neighbor_comm = G_filtered.nodes[neighbor].get('louvain_community', 0)
+                        connected_comms.add(neighbor_comm)
+                    bridge_connections[node_id] = {
+                        'name': name,
+                        'betweenness': betw,
+                        'own_comm': own_comm,
+                        'connected_comms': connected_comms
+                    }
+                
+                # Tính vị trí: Communities xếp vòng tròn, Bridges ở giữa
+                num_comms = len(meta_G.nodes())
+                radius = 400
+                
+                # Vẽ community nodes theo vòng tròn
+                for i, node in enumerate(meta_G.nodes()):
+                    angle = 2 * math.pi * i / num_comms
+                    x = radius * math.cos(angle)
+                    y = radius * math.sin(angle)
                     
-                    # Tìm ID của người được dự báo
-                    target_id = name_to_id.get(target_name)
+                    data = meta_G.nodes[node]
+                    size = min(data['size'] * 2, 100)
+                    color = colors[node % len(colors)]
                     
-                    if target_id:
-                        if not G_viz.has_node(target_id):
-                            if G_full.has_node(target_id):
-                                G_viz.add_node(target_id, **G_full.nodes[target_id])
-                            else:
-                                G_viz.add_node(target_id, label=target_name, group=99) # Fallback
-                        
-                        # THÊM CẠNH DỰ BÁO (Đánh dấu type='future')
-                        if not G_viz.has_edge(center_id, target_id):
-                            G_viz.add_edge(center_id, target_id, 
-                                           title=f"Dự báo: {model_name}\nScore: {score:.4f}", 
-                                           type='future')
+                    bridges_info = "\n".join([f"  • {name}: {score:.4f}" 
+                                              for _, score, name in data['top_bridges'][:3]])
+                    
+                    title = f"""Community {node}
+━━━━━━━━━━━━━━━━━━━━
+👥 Số tác giả: {data['size']}
+🔗 Kết nối nội bộ: {data['internal_edges']}
+🌉 Kết nối ra ngoài: {data['external_edges']}
+📊 Betweenness TB: {data['avg_betweenness']:.6f}
 
-            st.success(f"🔍 Đang focus vào: **{selected_author}**")
-        else:
-            st.warning("Tác giả không tìm thấy trong bộ lọc hiện tại.")
-            G_viz = nx.Graph()
+🏆 Top Bridges:
+{bridges_info}"""
+                    
+                    net.add_node(f"comm_{node}", 
+                                label=f"C{node}\n({data['size']})",
+                                title=title,
+                                size=size,
+                                color=color,
+                                shape='dot',
+                                x=x, y=y,
+                                font={'size': 14, 'color': 'white'})
+                
+                # Vẽ bridges ở giữa (cluster nhỏ quanh tâm)
+                for i, (node_id, betw, name, comm) in enumerate(all_bridges):
+                    angle = 2 * math.pi * i / len(all_bridges)
+                    x = 80 * math.cos(angle)
+                    y = 80 * math.sin(angle)
+                    
+                    conn_info = bridge_connections[node_id]
+                    num_connected = len(conn_info['connected_comms'])
+                    comms_list = ", ".join([f"C{c}" for c in sorted(conn_info['connected_comms'])])
+                    
+                    title = f"""🌉 BRIDGE AUTHOR
+━━━━━━━━━━━━━━━━━━━━
+👤 {name}
+🏘️ Community gốc: {comm}
+🔗 Betweenness: {betw:.6f}
+🌐 Kết nối {num_connected} communities:
+   {comms_list}
 
-    # TH2: Chế độ Tổng quan (Áp dụng Top N)
-    else:
-        nodes_sorted = sorted(G_comm.nodes(data=True),
-                              key=lambda x: x[1].get('betweenness', 0),
-                              reverse=True)
-        top_node_ids = [n[0] for n in nodes_sorted[:top_n]]
-        G_viz = G_comm.subgraph(top_node_ids).copy()
+Tác giả này là cầu nối giữa
+{num_connected} nhóm nghiên cứu khác nhau."""
+                    
+                    net.add_node(f"bridge_{node_id}",
+                                label=f"⭐{name}",
+                                title=title,
+                                size=20 + betw * 800,
+                                color={'background': '#FFD700', 'border': '#FF4500'},
+                                shape='star',
+                                x=x, y=y,
+                                borderWidth=3,
+                                font={'size': 11, 'color': 'white', 'strokeWidth': 2, 'strokeColor': 'black'})
+                    
+                    # Kết nối bridge với TẤT CẢ communities mà họ có đồng tác giả
+                    for connected_comm in conn_info['connected_comms']:
+                        if f"comm_{connected_comm}" in [n['id'] for n in net.nodes]:
+                            # Màu khác nhau: vàng cho community gốc, cam cho các community khác
+                            edge_color = '#FFD700' if connected_comm == comm else '#FF6B6B'
+                            edge_width = 3 if connected_comm == comm else 2
+                            net.add_edge(f"bridge_{node_id}", f"comm_{connected_comm}",
+                                        color={'color': edge_color, 'opacity': 0.7},
+                                        width=edge_width,
+                                        dashes=True,
+                                        title=f"{'Community gốc' if connected_comm == comm else 'Có đồng tác giả'}")
+                
+                # Edges giữa communities
+                max_weight = max((d['weight'] for _, _, d in meta_G.edges(data=True)), default=1)
+                for u, v, d in meta_G.edges(data=True):
+                    width = (d['weight'] / max_weight) * 8
+                    net.add_edge(f"comm_{u}", f"comm_{v}", 
+                                width=width,
+                                title=f"Kết nối C{u} ↔ C{v}: {d['weight']} edges",
+                                color={'color': '#ffffff', 'opacity': 0.2})
+                
+                net.set_options("""
+                {
+                    "interaction": {"hover": true, "tooltipDelay": 100, "zoomView": true, "dragView": true},
+                    "physics": {
+                        "enabled": true,
+                        "barnesHut": {"gravitationalConstant": -2000, "springLength": 150, "damping": 0.9},
+                        "maxVelocity": 3, "minVelocity": 0.1,
+                        "stabilization": {"enabled": true, "iterations": 150}
+                    }
+                }
+                """)
+            
+            else:
+                # === CHẾ ĐỘ BÌNH THƯỜNG (chỉ communities) ===
+                for node in meta_G.nodes():
+                    data = meta_G.nodes[node]
+                    size = min(data['size'] * 2, 100)
+                    color = colors[node % len(colors)]
+                    
+                    bridges_info = "\n".join([f"  • {name}: {score:.4f}" 
+                                              for _, score, name in data['top_bridges'][:3]])
+                    
+                    title = f"""Community {node}
+━━━━━━━━━━━━━━━━━━━━
+👥 Số tác giả: {data['size']}
+🔗 Kết nối nội bộ: {data['internal_edges']}
+🌉 Kết nối ra ngoài: {data['external_edges']}
+📊 Betweenness TB: {data['avg_betweenness']:.6f}
 
-    # ==========================================
-    #  VẼ GIAO DIỆN CHÍNH
-    # ==========================================
-    col1, col2 = st.columns([3, 1])
-
-    with col1:
-        if G_viz and G_viz.number_of_nodes() > 0:
-            net = Network(height="600px", width="100%", bgcolor="#222222", font_color="white")
-
-            for n, d in G_viz.nodes(data=True):
-                label = d.get('label', str(n))
-                group = d.get('louvain_community', 0)
-                title = f"{label}\nGroup: {group}\nScore: {d.get('betweenness', 0):.4f}"
-
-                # HIGHLIGHT NODE CHÍNH KHI FOCUS
-                if selected_author != "-- Xem Tổng Quan --" and label == selected_author:
-                    net.add_node(n,
-                                 label=f"⭐ {label}",
-                                 title=title,
-                                 shape='star',
-                                 size=70,
-                                 color={
-                                     'background': '#FFD700',
-                                     'border': '#FF4500',
-                                     'highlight': {'background': '#FFFF00', 'border': '#FF0000'}
-                                 },
-                                 borderWidth=5,
-                                 font={'size': 20, 'color': 'white', 'strokeWidth': 3, 'strokeColor': 'black'},
-                                 group=group)
-                else:
-                    size = d.get('betweenness', 0.01) * 3000
-                    if size < 10:
-                        size = 10
-                    net.add_node(n, label=label, title=title, value=size, group=group)
-
-            # --- VẼ CẠNH ---
-            for u, v, d in G_viz.edges(data=True):
-                # Kiểm tra xem đây là cạnh thường hay dự báo
-                if d.get('type') == 'future':
-                    # Cấu hình nét đứt (dashes) và màu nổi bật
+🏆 Top Bridges:
+{bridges_info}"""
+                    
+                    net.add_node(node, 
+                                label=f"C{node}\n({data['size']})",
+                                title=title,
+                                size=size,
+                                color=color,
+                                shape='dot',
+                                font={'size': 14, 'color': 'white'})
+                
+                max_weight = max((d['weight'] for _, _, d in meta_G.edges(data=True)), default=1)
+                for u, v, d in meta_G.edges(data=True):
+                    width = (d['weight'] / max_weight) * 10
                     net.add_edge(u, v, 
-                                 title=d.get('title', ''), 
-                                 color='red', 
-                                 dashes=True,  # <--- NÉT ĐỨT
-                                 width=2)
-                else:
-                    # Cạnh bình thường
-                    net.add_edge(u, v, value=1, color={'inherit': 'from', 'opacity': 0.6})
-
-            net.barnes_hut(gravity=-2000, spring_length=150)
-
-            html_string = net.generate_html()
-            components.html(html_string, height=620)
-        else:
-            st.info("Không có dữ liệu. Hãy nới lỏng bộ lọc.")
-
-    with col2:
-        st.subheader("📈 Thống kê View")
-        if G_viz:
-            st.metric("Tác giả hiển thị", G_viz.number_of_nodes())
-            # Tách số liệu mối quan hệ
-            num_edges = G_viz.number_of_edges()
-            num_future = sum(1 for u,v,d in G_viz.edges(data=True) if d.get('type') == 'future')
-            st.metric("Mối quan hệ", num_edges, delta=f"+{num_future} Dự báo" if num_future > 0 else None)
-
-        if selected_author == "-- Xem Tổng Quan --" and G_viz and G_viz.number_of_nodes() > 0:
-            # --- PIE CHART: PHÂN BỐ CỘNG ĐỒNG ---
-            st.markdown("#### 🥧 Phân bố Cộng đồng")
-            comm_counts = {}
-            for n, d in G_viz.nodes(data=True):
-                comm = str(d.get('louvain_community', 0))
-                comm_counts[comm] = comm_counts.get(comm, 0) + 1
-            
-            df_pie = pd.DataFrame([
-                {'Cộng đồng': f"Nhóm {k}", 'Số lượng': v} 
-                for k, v in sorted(comm_counts.items(), key=lambda x: -x[1])
-            ])
-            
-            fig_pie = px.pie(df_pie, values='Số lượng', names='Cộng đồng', 
-                            hole=0.4,
-                            color_discrete_sequence=px.colors.qualitative.Set3)
-            fig_pie.update_layout(
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=-0.3),
-                margin=dict(t=20, b=20, l=20, r=20),
-                height=250
-            )
-            fig_pie.update_traces(textposition='inside', textinfo='percent')
-            st.plotly_chart(fig_pie, use_container_width=True)
-            
-            # --- BAR CHART: XẾP HẠNG ---
-            st.markdown("#### 🏆 Top Bridges")
-            data_chart = []
-            for n, d in G_viz.nodes(data=True):
-                data_chart.append({
-                    'Tên': d.get('label', str(n)),
-                    'Điểm': d.get('betweenness', 0),
-                    'Nhóm': str(d.get('louvain_community', 0))
-                })
-            df_chart = pd.DataFrame(data_chart).sort_values('Điểm', ascending=False).head(10)
-
-            fig = px.bar(df_chart, x='Điểm', y='Tên', color='Nhóm', orientation='h',
-                        color_discrete_sequence=px.colors.qualitative.Set2)
-            fig.update_layout(
-                yaxis={'categoryorder': 'total ascending'}, 
-                showlegend=False,
-                margin=dict(t=10, b=10, l=10, r=10),
-                height=300
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        elif selected_author != "-- Xem Tổng Quan --" and G_viz:
-            st.markdown("### 👥 Kết nối trực tiếp")
-            if selected_author in name_to_id:
-                center_id = name_to_id[selected_author]
-                neighbors_list = []
-                for neighbor_id in G_viz.neighbors(center_id):
-                    edge_data = G_viz.get_edge_data(center_id, neighbor_id)
-                    if edge_data.get('type') != 'future':
-                        neighbors_list.append(G_viz.nodes[neighbor_id].get('label', str(neighbor_id)))
+                                width=width,
+                                title=f"Kết nối giữa C{u} ↔ C{v}: {d['weight']} edges",
+                                color={'color': '#ffffff', 'opacity': 0.3})
                 
-                if neighbors_list:
-                    st.dataframe(pd.DataFrame(neighbors_list, columns=["Đồng tác giả"]), hide_index=True)
-                else:
-                    st.info("Chưa có kết nối nào trong bộ lọc này.")
+                net.barnes_hut(gravity=-3000, spring_length=200)
+                net.set_options("""
+                {
+                    "interaction": {"hover": true, "tooltipDelay": 100, "zoomView": true, "dragView": true},
+                    "physics": {
+                        "enabled": true,
+                        "barnesHut": {"gravitationalConstant": -3000, "springLength": 200, "damping": 0.95},
+                        "maxVelocity": 5, "minVelocity": 0.1,
+                        "stabilization": {"enabled": true, "iterations": 200}
+                    }
+                }
+                """)
+            
+            html = net.generate_html()
+            components.html(html, height=620)
+        
+        with col2:
+            st.markdown("### 📊 Thống kê Communities")
+            
+            # Bảng top communities
+            comm_df = pd.DataFrame([
+                {
+                    'Community': f"C{cid}",
+                    'Số tác giả': stats['size'],
+                    'Edges nội bộ': stats['internal_edges'],
+                    'Edges ra ngoài': stats['external_edges']
+                }
+                for cid, stats in sorted(comm_stats.items(), key=lambda x: -x[1]['size'])[:10]
+            ])
+            st.dataframe(comm_df, hide_index=True, use_container_width=True)
+            
+            # Pie chart
+            st.markdown("### 🥧 Phân bố kích thước")
+            sizes = [stats['size'] for stats in comm_stats.values()]
+            labels = [f"C{cid}" for cid in comm_stats.keys()]
+            
+            fig = px.pie(values=sizes[:15], names=labels[:15], hole=0.4,
+                        color_discrete_sequence=px.colors.qualitative.Set3)
+            fig.update_layout(height=250, margin=dict(t=20, b=20, l=20, r=20),
+                             showlegend=True, legend=dict(orientation="h", y=-0.2))
+            fig.update_traces(textposition='inside', textinfo='percent')
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.info("💡 **Tip:** Hover vào node để xem chi tiết. Click và kéo để di chuyển. Scroll để zoom.")
 
-            # BẢNG DỰ BÁO
-            if not df_pred.empty:
-                st.markdown("### 🔮 Dự báo tiềm năng")
-                my_preds = df_pred[df_pred['Source'] == selected_author][['Target', 'Score', 'Model']].copy()
-                if not my_preds.empty:
-                    my_preds['Score'] = my_preds['Score'].apply(lambda x: f"{x:.6f}")
-                    st.dataframe(my_preds.head(10), hide_index=True)
-                else:
-                    st.info("Chưa có dự báo cho tác giả này.")
+    # ==========================================
+    # LEVEL 2: CHI TIẾT COMMUNITY
+    # ==========================================
+    elif "Level 2" in view_level:
+        st.subheader("🏘️ Chi tiết Community")
+        
+        # Chọn community
+        comm_options = sorted(comm_stats.keys(), key=lambda x: -comm_stats[x]['size'])
+        selected_comm = st.sidebar.selectbox(
+            "Chọn Community:",
+            options=comm_options,
+            format_func=lambda x: f"Community {x} ({comm_stats[x]['size']} tác giả)"
+        )
+        
+        # Lấy subgraph của community
+        comm_nodes = [n for n, d in G_filtered.nodes(data=True) 
+                      if d.get('louvain_community') == selected_comm]
+        G_comm = G_filtered.subgraph(comm_nodes).copy()
+        
+        # Thêm bridge connections (edges ra ngoài community)
+        show_bridges = st.sidebar.checkbox("Hiện kết nối ra ngoài (bridges)", value=True)
+        
+        if show_bridges:
+            bridge_nodes = set()
+            for n in comm_nodes:
+                for neighbor in G_filtered.neighbors(n):
+                    if G_filtered.nodes[neighbor].get('louvain_community') != selected_comm:
+                        bridge_nodes.add(neighbor)
+            
+            # Thêm bridge nodes (giới hạn để không quá nặng)
+            bridge_nodes = list(bridge_nodes)[:50]
+            extended_nodes = comm_nodes + bridge_nodes
+            G_comm = G_filtered.subgraph(extended_nodes).copy()
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            net = Network(height="600px", width="100%", bgcolor="#1a1a2e", font_color="white")
+            colors = px.colors.qualitative.Set3 + px.colors.qualitative.Pastel
+            
+            for n, d in G_comm.nodes(data=True):
+                label = d.get('label', str(n))
+                comm = d.get('louvain_community', 0)
+                betweenness = d.get('betweenness', 0)
+                
+                title = f"""👤 {label}
+━━━━━━━━━━━━━━━━━━━━
+🏘️ Community: {comm}
+🔗 Betweenness: {betweenness:.6f}
+📊 Degree: {G_comm.degree(n)}
+
+{'🌉 BRIDGE AUTHOR' if comm != selected_comm else ''}
+{'(Kết nối từ community khác)' if comm != selected_comm else ''}"""
+                
+                # Styling
+                if comm == selected_comm:
+                    # Node trong community chính
+                    size = max(betweenness * 5000, 15)
+                    color = colors[comm % len(colors)]
                     
+                    # Highlight top bridges
+                    top_bridge_ids = [bid for bid, _, _ in comm_stats[selected_comm]['top_bridges']]
+                    if n in top_bridge_ids:
+                        net.add_node(n, label=f"⭐{label}", title=title, size=size*1.2,
+                                    color={'background': '#FFD700', 'border': '#FF4500'},
+                                    borderWidth=3, font={'size': 12, 'color': 'white'})
+                    else:
+                        net.add_node(n, label=label, title=title, size=size, color=color)
+                else:
+                    # Bridge node từ community khác
+                    net.add_node(n, label=label, title=title, size=20,
+                                color={'background': '#555555', 'border': '#888888'},
+                                shape='diamond', font={'size': 10, 'color': '#aaaaaa'})
+            
+            # Edges
+            for u, v, d in G_comm.edges(data=True):
+                comm_u = G_comm.nodes[u].get('louvain_community')
+                comm_v = G_comm.nodes[v].get('louvain_community')
+                
+                if comm_u == selected_comm and comm_v == selected_comm:
+                    # Internal edge
+                    net.add_edge(u, v, color={'color': colors[selected_comm % len(colors)], 'opacity': 0.5})
+                else:
+                    # Bridge edge
+                    net.add_edge(u, v, color={'color': '#ff6b6b', 'opacity': 0.8}, 
+                                dashes=True, width=2,
+                                title="🌉 Kết nối liên community")
+            
+            net.barnes_hut(gravity=-2000, spring_length=150)
+            html = net.generate_html()
+            components.html(html, height=620)
+        
+        with col2:
+            stats = comm_stats[selected_comm]
+            
+            st.markdown(f"### 📈 Community {selected_comm}")
+            st.metric("Số tác giả", stats['size'])
+            st.metric("Kết nối nội bộ", stats['internal_edges'])
+            st.metric("Kết nối ra ngoài", stats['external_edges'])
+            
+            # Tỷ lệ kết nối
+            total_conn = stats['internal_edges'] + stats['external_edges']
+            if total_conn > 0:
+                internal_ratio = stats['internal_edges'] / total_conn * 100
+                st.progress(internal_ratio / 100, text=f"Nội bộ: {internal_ratio:.1f}%")
+            
+            st.markdown("### 🏆 Top Bridges")
+            bridges_df = pd.DataFrame([
+                {'Tên': name, 'Betweenness': f"{score:.6f}"}
+                for _, score, name in stats['top_bridges']
+            ])
+            st.dataframe(bridges_df, hide_index=True, use_container_width=True)
+            
+            st.markdown("""
+            <div class="tooltip-box">
+                <h4>💡 Gợi ý</h4>
+                <p>⭐ = Top bridge trong community</p>
+                <p>◆ = Tác giả từ community khác</p>
+                <p>--- = Kết nối liên community</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ==========================================
+    # LEVEL 3: FOCUS TÁC GIẢ (Ego Network)
+    # ==========================================
+    elif "Level 3" in view_level:
+        st.subheader("👤 Focus Tác giả - Ego Network")
+        
+        # Search tác giả
+        all_names = sorted(name_to_id.keys())
+        selected_author = st.sidebar.selectbox(
+            "🔍 Tìm tác giả:",
+            options=["-- Chọn tác giả --"] + all_names,
+            help="Gõ tên để tìm kiếm"
+        )
+        
+        # Depth của ego network
+        ego_depth = st.sidebar.slider("Độ sâu mạng lưới:", 1, 3, 1,
+                                      help="1 = chỉ kết nối trực tiếp, 2 = bạn của bạn, ...")
+        
+        if selected_author != "-- Chọn tác giả --":
+            center_id = name_to_id.get(selected_author)
+            
+            if center_id and center_id in G_filtered:
+                # Build ego network
+                G_ego = nx.ego_graph(G_filtered, center_id, radius=ego_depth)
+                
+                # Thêm predicted edges
+                predicted_edges = []
+                if not df_pred.empty:
+                    my_preds = df_pred[df_pred['Source'] == selected_author]
+                    for _, row in my_preds.iterrows():
+                        target_name = row['Target']
+                        target_id = name_to_id.get(target_name)
+                        if target_id and target_id in G_filtered.nodes():
+                            if not G_ego.has_node(target_id):
+                                G_ego.add_node(target_id, **G_filtered.nodes[target_id])
+                            if not G_ego.has_edge(center_id, target_id):
+                                G_ego.add_edge(center_id, target_id, 
+                                              type='predicted',
+                                              score=row['Score'],
+                                              model=row['Model'])
+                                predicted_edges.append((target_name, row['Score'], row['Model']))
+                
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    net = Network(height="600px", width="100%", bgcolor="#1a1a2e", font_color="white")
+                    colors = px.colors.qualitative.Set3 + px.colors.qualitative.Pastel
+                    
+                    # Tính distance từ center
+                    distances = nx.single_source_shortest_path_length(G_ego, center_id)
+                    
+                    for n, d in G_ego.nodes(data=True):
+                        label = d.get('label', str(n))
+                        comm = d.get('louvain_community', 0)
+                        betweenness = d.get('betweenness', 0)
+                        dist = distances.get(n, 99)
+                        
+                        title = f"""👤 {label}
+━━━━━━━━━━━━━━━━━━━━
+🏘️ Community: {comm}
+🔗 Betweenness: {betweenness:.6f}
+📏 Khoảng cách: {dist} bước
+📊 Degree (trong view): {G_ego.degree(n)}"""
+                        
+                        if n == center_id:
+                            # Center node - highlight đặc biệt
+                            net.add_node(n, 
+                                        label=f"⭐ {label}",
+                                        title=title,
+                                        size=45,
+                                        color={'background': '#FFD700', 'border': '#FF4500',
+                                               'highlight': {'background': '#FFFF00', 'border': '#FF0000'}},
+                                        shape='star',
+                                        borderWidth=5,
+                                        font={'size': 18, 'color': 'white', 'strokeWidth': 2, 'strokeColor': 'black'})
+                        else:
+                            # Các node khác - size theo distance
+                            size = max(30 - dist * 8, 10)
+                            opacity = 1 - dist * 0.2
+                            net.add_node(n, label=label, title=title, size=size,
+                                        color=colors[comm % len(colors)],
+                                        font={'size': 10, 'color': f'rgba(255,255,255,{opacity})'})
+                    
+                    # Edges
+                    for u, v, d in G_ego.edges(data=True):
+                        if d.get('type') == 'predicted':
+                            # Predicted edge - nét đứt đỏ
+                            score = d.get('score', 0)
+                            model = d.get('model', 'Unknown')
+                            net.add_edge(u, v, 
+                                        color='#ff4757',
+                                        dashes=True,
+                                        width=3,
+                                        title=f"🔮 DỰ BÁO\nModel: {model}\nScore: {score:.6f}")
+                        else:
+                            # Existing edge
+                            years = d.get('years', '')
+                            net.add_edge(u, v, 
+                                        color={'color': '#4fc3f7', 'opacity': 0.5},
+                                        title=f"Năm hợp tác: {years}" if years else "")
+                    
+                    net.barnes_hut(gravity=-2500, spring_length=180)
+                    html = net.generate_html()
+                    components.html(html, height=620)
+                
+                with col2:
+                    # Thông tin tác giả
+                    author_data = G_filtered.nodes[center_id]
+                    
+                    st.markdown(f"### 👤 {selected_author}")
+                    st.metric("Community", author_data.get('louvain_community', 'N/A'))
+                    st.metric("Betweenness", f"{author_data.get('betweenness', 0):.6f}")
+                    st.metric("Số đồng tác giả", G_filtered.degree(center_id))
+                    
+                    # Danh sách đồng tác giả
+                    st.markdown("### 👥 Đồng tác giả")
+                    coauthors = []
+                    for neighbor in G_filtered.neighbors(center_id):
+                        n_data = G_filtered.nodes[neighbor]
+                        coauthors.append({
+                            'Tên': n_data.get('label', neighbor),
+                            'Community': n_data.get('louvain_community', 'N/A')
+                        })
+                    
+                    if coauthors:
+                        st.dataframe(pd.DataFrame(coauthors[:15]), hide_index=True, use_container_width=True)
+                    
+                    # Dự báo
+                    if predicted_edges:
+                        st.markdown("### 🔮 Dự báo kết nối")
+                        pred_df = pd.DataFrame([
+                            {'Tác giả': name, 'Score': f"{score:.4f}", 'Model': model}
+                            for name, score, model in predicted_edges[:10]
+                        ])
+                        st.dataframe(pred_df, hide_index=True, use_container_width=True)
+                        
+                        st.markdown("""
+                        <div class="tooltip-box">
+                            <h4>🔮 Về Link Prediction</h4>
+                            <p>Dự báo khả năng hợp tác trong tương lai dựa trên cấu trúc mạng lưới hiện tại.</p>
+                            <p>Score cao = khả năng cao sẽ có bài báo chung.</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+            else:
+                st.warning("Không tìm thấy tác giả trong dữ liệu.")
+        else:
+            st.info("👈 Chọn một tác giả từ sidebar để xem ego network.")
+            
+            # Hiển thị top bridges khi chưa chọn ai
+            st.markdown("### 🏆 Top Bridge Authors (Gợi ý)")
+            top_bridges = sorted(
+                [(n, d.get('betweenness', 0), d.get('label', n), d.get('louvain_community', 0)) 
+                 for n, d in G_filtered.nodes(data=True)],
+                key=lambda x: -x[1]
+            )[:20]
+            
+            bridges_df = pd.DataFrame([
+                {'Tên': name, 'Betweenness': f"{score:.6f}", 'Community': comm}
+                for _, score, name, comm in top_bridges
+            ])
+            st.dataframe(bridges_df, hide_index=True, use_container_width=True)
+
+else:
+    st.error("Không thể load dữ liệu. Kiểm tra file graph_with_time.gexf")
